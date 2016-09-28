@@ -1,0 +1,301 @@
+#!/usr/bin/python3
+#pythondialog needed
+#TODO: add test\check subprogram
+import xml.etree.ElementTree as ET
+from ftplib import FTP
+from os.path import isfile
+from os.path import expanduser
+import argparse
+from copy import deepcopy
+DEBUG=0
+home=expanduser("~")
+configuration_file_path=home+'/.config/ftp-backup.cfg'
+version='ftp-backup v0'
+def __main__():
+    parser=argparse.ArgumentParser(description='Backup your smartphone wirelessly thru ftp',epilog='Created by Filippo Volpe (filippodalfarra98@gmail.com).')
+    parser.add_argument('-v','--version',action='version',version=version)
+    parser.add_argument('--gui',action='store_true',help='use the GUI')
+    #subparsers
+    subparsers=parser.add_subparsers(title='subparts',help='different subprograms')
+    #parser_init
+    parser_init=subparsers.add_parser('init',help='init a configuration')
+    parser_init.add_argument('device_name',help='name of new device',metavar='DEV')
+    parser_init.add_argument('address',help='address of ftp server',metavar='ADDR')
+    parser_init.add_argument('-p','--port',help='set special port of fpt server',metavar='PORT')
+    parser_init.add_argument('-u','--user',help='username to access ftp server',metavar='USER')
+    parser_init.add_argument('-k','--passwd',help='password to access ftp server',metavar='PASS')
+    parser_init.add_argument('-e','--enable',action='store_true',help='enable immediately the device')
+    parser_init.set_defaults(func=initf)
+    #parser_modconf
+    parser_modconf=subparsers.add_parser('modconf',help='modify the configuration')
+    parser_modconf.add_argument('device',help='name of device to modify',metavar='DEV')
+    #parser_modconf.add_argument('-r','--remove-folder',nargs=1,help='remove a folder from configuration',metavar='NAME')
+    parser_modconf.add_argument('-d','--delete-device',help='delete device',metavar='NAME')
+    parser_modconf.set_defaults(func=modconf)
+    #parser_addfolder
+    parser_addfolder=subparsers.add_parser('addfolder',help='add a folder')
+    parser_addfolder.add_argument('device',help='name of device to modify',metavar='DEV')
+    parser_addfolder.add_argument('name',help='name of folder',metavar='NAME')
+    parser_addfolder.add_argument('source',help='source folder',metavar='SOUR')
+    parser_addfolder.add_argument('destination',help='destination folder',metavar='DEST')
+    parser_addfolder.add_argument('-f','--filter-type',choices=['e','o'],help='filter type',metavar='FT',default='e')
+    parser_addfolder.add_argument('-s','--filter-string',help='filter string',metavar='FS',default='')#the filter string is like 'png,pdf,doc'
+    parser_addfolder.add_argument('-i','--include-hidden',action='store_true',help='include hidden files')
+    parser_addfolder.add_argument('-e','--enable',action='store_true',help='enable immediately the folder')
+    parser_addfolder.set_defaults(func=addfolderf)
+    #parser_list
+    parser_list=subparsers.add_parser('list',help='list all devices')#TODO:adding options
+    parser_list.add_argument('-a','--all',action='store_true',help='all devices with folders')
+    parser_list.set_defaults(func=listf)
+    #parser_backup
+    parser_backup=subparsers.add_parser('backup',help='start a backup')
+    parser_backup.add_argument('-a','--all',action='store_true',help='start to backup all active devices')
+    parser_backup.add_argument('-d','--device',help='start to backup selected device',metavar='DEV')
+    parser_backup.set_defaults(func=backupf)
+    ##parsing
+    args=parser.parse_args()
+    #handle the stuff
+    if DEBUG:
+        print(args)
+    if args.gui:
+        gui()
+        return
+    if hasattr(args,'func'): #if subprogram is called, call the proper function
+        args.func(args)
+        return
+    #if nothing interrupt it will print the help
+    parser.print_help()
+def gui():
+    try:
+        from dialog import Dialog#used for gui interaction
+    except ImportError:
+        print('Please install pythondialog to use the gui :(')
+        print('You can run: pip install pythondialog')
+        exit(-1)
+
+    pass
+def initf(args):
+    conf=Configuration(configuration_file_path)
+    if DEBUG:
+        print('Adding device:',args.device_name)
+    conf.addDevice(Device(args.device_name,args.address,args.port,args.user,args.passwd,args.enable))
+    conf.write(configuration_file_path)
+def addfolderf(args):
+    conf=Configuration(configuration_file_path)
+    if DEBUG:
+        print('Adding folder:',args.device)
+    conf.addFolderToDevice(args.device,args.name,args.source,args.destination,args.filter_type,args.filter_string,args.include_hidden,args.enable)
+    conf.write(configuration_file_path)
+def listf(args):
+    conf=Configuration(configuration_file_path)
+    for device in conf.devices:##TODO: convert in conf.printConfiguration()
+        print('Device 1:')
+        device.printDevice()
+def modconf(args): ##I have no idea how to handle this
+    pass
+def backupf(args):
+    if args.all:
+        conf=Configuration(configuration_file_path)
+        for device in conf.devices:
+            device.backup()
+    elif args.device:
+        pass#device_name=args.device
+##Configuration
+class Configuration:
+    """Configuration containing the devices"""
+    default_configuration_file="""<?xml version="1.0"?><configuration></configuration>"""
+    #Class parameters:
+    #devices[]
+    #tree
+    #root
+    def __init__(self,configuration_file_path):
+        self.devices=[]
+        if not isfile(configuration_file_path): #create file
+            self.createConfigurationFile(configuration_file_path)
+        self.tree=ET.parse(configuration_file_path)
+        self.root=self.tree.getroot()
+        for deviceE in self.root.iter('device'):
+            self.devices.append(Device.fromDeviceElement(deviceE))
+    def write(self,configuration_file_path):
+        #deleting all devices
+        for deviceE in self.root.findall('device'):
+            self.root.remove(deviceE)
+        ET.dump(self.root)
+        #re-adding devices
+        print(len(self.devices))
+        for device in self.devices:
+            self.root.append(device.getDeviceElement())
+        #writing new file
+        self.tree.write(configuration_file_path)
+    def createConfigurationFile(self,configuration_file_path):
+        if DEBUG:
+            print('Writing default configuration file...')
+        configuration_file=open(configuration_file_path,'w')
+        configuration_file.write(self.default_configuration_file)
+        configuration_file.close()
+        if DEBUG:
+            print('Configuration file created in ',configuration_file_path,'\nYou can modify it manually at your own risk')
+    def addDevice(self,device):
+        if not self.checkAvaibleDeviceName(device.name):
+            print('Name already used!')
+            exit(-1)
+        self.devices.append(device)
+    def checkAvaibleDeviceName(self,name):
+        for device in self.devices:
+            if device.name == name:
+                if DEBUG:
+                    print('Name not avaible')
+                return False
+        if DEBUG:
+            print('Name avaible')
+        return True
+    def addFolderToDevice(self,device,name,source,destination,filter_type='e',filter_string='',include_hidden=False,enable=False):
+        #Search the name
+        i=0
+        try:
+            while(self.devices[i].name != device):
+                i+=1
+        except IndexError:
+            print('Device name not found!')
+            exit(-1)
+        self.devices[i].addFolder(Folder(name,source,destination,filter_type,filter_string,include_hidden,enable))
+##End Configuration
+##Device
+class Device:
+    """Device class represent a device with all its configuration"""
+    def __init__(self,name,address,port=0,user='',passwd='',enable=True,folders=[]):
+        self.name=name
+        self.address=address
+        self.enable=enable
+        self.folders=folders
+        if port:
+            self.port=port
+        if user:
+            self.user=user
+            self.passwd=passwd
+        if DEBUG: #Only in debug mode
+            print('Device created:')
+            self.printDevice()
+    @classmethod
+    def fromDeviceElement(cls,deviceE):
+        port=int(deviceE.get('port')) if deviceE.get('port') else 0
+        user=deviceE.get('user') if deviceE.get('user') else ''
+        passwd=deviceE.get('passwd') if deviceE.get('passwd') else ''
+        enable='true' == deviceE.get('enable')
+        folders=[]
+        for folderE in deviceE.iter('folder'):
+            folders.append(Folder.fromFolderElement(folderE))
+        return cls(deviceE.get('name'),deviceE.get('address'),port,user,passwd,enable,folders)
+
+    def getDeviceElement(self):
+        deviceE=ET.Element('device')
+        deviceE.set('name',self.name)
+        deviceE.set('address',self.address)
+        deviceE.set('enable',('true' if self.enable else 'false'))
+        if hasattr(self,'port'):
+            deviceE.set('port',str(self.port))
+        if hasattr(self,'user'):
+            deviceE.set('user',self.user)
+            deviceE.set('passwd',self.passwd)
+        for folder in self.folders:
+            deviceE.append(folder.getFolderElement())
+        return deviceE
+    def addFolder(self,folder):
+        if not self.checkAvaibleFolderName(folder.name):
+            print('Folder name already used!')
+            exit(-1)
+        self.folders.append(folder)
+    def printDevice(self):
+        print('\tName:',self.name,'\n\tAddress:',self.address)
+        if hasattr(self,'port'):
+            print('\tPort:',self.port)
+        if hasattr(self,'user'):
+            print('\tUser:',self.user,'\n\tPasswd:',self.passwd)
+        print('\tEnable:',self.enable)
+    def checkAvaibleFolderName(self,name):
+        for folder in self.folders:
+            if folder.name == name:
+                if DEBUG:
+                    print('Name not avaible')
+                return False
+        if DEBUG:
+            print('Name avaible')
+        return True
+    def backup(self):
+        def getFileNames(retrlines,include_hidden=False,filter_type='e',filter_string=''):
+            def getWordFromFirstIndex(line,index):
+                word=''
+                while index<len(line):
+                    word=word+line[index]
+                    index+=1
+                return word
+            def getExtensionFromFileName(filename): #return the extension without the .
+                p=len(filename)-1#last character
+                extension=[]
+                while p != 0 and filename[p] is not '.':
+                    extension.insert(0,filename[p])
+                    p-=1
+                if p == 0:
+                    return ''
+                return ''.join(extension)
+            files=[]
+            for line in retrlines:
+                if line[0] is '-':##that's a file
+                    p=0
+                    for i in range(0,8): #skip first seven whitespaces
+                        while line[p] is not ' ':
+                            p+=1
+                        p+=1
+                    #p = first index of file name
+                    if (line[p] != '.') or ((line[p] == '.') and include_hidden):
+                        extension=getExtensionFromFileName(getWordFromFirstIndex(line,p))
+                        if ((filter_type == 'e') and (extension not in filter_string.split(','))) or ((filter_type == 'o') and (extension in filter_string.split(','))):
+                            files.append(getWordFromFirstIndex(line,p))#this file need to be backed up
+            return files
+        ftps=FTP()
+        print('Connecting to device',self.name,'addr',self.address)
+        ftps.connect(self.address,self.port if hasattr(self,'port') else 0) ##connected
+        if hasattr(self,'user'):
+            print('Logging in to',self.name)
+            ftps.login(self.user,self.passwd)
+        print('Connected to',self.name)
+        for folder in self.folders:#backup each folder
+            ftps.cwd(folder.source)
+            lines=[]
+            ftps.retrlines('LIST',lines.append)
+            print('folder:',folder.name)
+            files=getFileNames(lines,folder.include_hidden,folder.filter_type,folder.filter_string)
+            for name in files:
+                print('Downloading file:',folder.source+'/'+name)
+                ftps.retrbinary('RETR %s' % folder.source+'/'+name,open(folder.dest+'/'+name,'wb').write)
+        ftps.close()
+##End Device
+##Folder
+class Folder:
+    def __init__(self,name,source,dest,filter_type='e',filter_string='',include_hidden=False,enable=True):
+        self.name=name
+        self.source=source
+        self.dest=dest
+        self.include_hidden=include_hidden
+        self.filter_type=filter_type
+        self.filter_string=filter_string
+        self.enable=enable
+    @classmethod
+    def fromFolderElement(cls,folderE):
+        return cls(folderE.get('name'),folderE.get('source'),folderE.get('dest'),folderE.get('filter_type'),folderE.get('filter_string'),('true'==folderE.get('include_hidden')),('true'==folderE.get('enable')))
+
+    def getFolderElement(self):
+        folderE=ET.Element('folder')
+        folderE.set('name',self.name)
+        folderE.set('source',self.source)
+        folderE.set('dest',self.dest)
+        folderE.set('include_hidden','true' if self.include_hidden else 'false')
+        folderE.set('filter_type',self.filter_type)
+        folderE.set('filter_string',self.filter_string)
+        folderE.set('enable','true' if self.enable else 'false')
+        return folderE
+    def printFolder(self):
+        pass
+##End Folder
+##Calling the main
+__main__()
