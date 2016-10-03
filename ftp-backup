@@ -1,7 +1,7 @@
 #!/usr/bin/python3
 #pythondialog needed
 #TODO: add test\check subprogram
-#TODO: command line like interface
+#TODO: add command line like interface
 
 import xml.etree.ElementTree as ET
 from ftplib import FTP
