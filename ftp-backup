@@ -1,12 +1,13 @@
 #!/usr/bin/python3
 #pythondialog needed
 #TODO: add test\check subprogram
+#TODO: command line like interface
+
 import xml.etree.ElementTree as ET
 from ftplib import FTP
 from os.path import isfile
 from os.path import expanduser
 import argparse
-from copy import deepcopy
 DEBUG=0
 home=expanduser("~")
 configuration_file_path=home+'/.config/ftp-backup.cfg'
@@ -29,8 +30,8 @@ def __main__():
     #parser_modconf
     parser_modconf=subparsers.add_parser('modconf',help='modify the configuration')
     parser_modconf.add_argument('device',help='name of device to modify',metavar='DEV')
-    #parser_modconf.add_argument('-r','--remove-folder',nargs=1,help='remove a folder from configuration',metavar='NAME')
-    parser_modconf.add_argument('-d','--delete-device',help='delete device',metavar='NAME')
+    parser_modconf.add_argument('-f','--remove-folder',help='remove a folder from configuration',metavar='FOLD')
+    parser_modconf.add_argument('-d','--remove-device',action='store_true',help='delete device')
     parser_modconf.set_defaults(func=modconf)
     #parser_addfolder
     parser_addfolder=subparsers.add_parser('addfolder',help='add a folder')
@@ -44,7 +45,7 @@ def __main__():
     parser_addfolder.add_argument('-e','--enable',action='store_true',help='enable immediately the folder')
     parser_addfolder.set_defaults(func=addfolderf)
     #parser_list
-    parser_list=subparsers.add_parser('list',help='list all devices')#TODO:adding options
+    parser_list=subparsers.add_parser('list',help='list all devices')#TODO:adding options?
     parser_list.add_argument('-a','--all',action='store_true',help='all devices with folders')
     parser_list.set_defaults(func=listf)
     #parser_backup
@@ -88,16 +89,18 @@ def addfolderf(args):
     conf.write(configuration_file_path)
 def listf(args):
     conf=Configuration(configuration_file_path)
-    for device in conf.devices:##TODO: convert in conf.printConfiguration()
-        print('Device 1:')
-        device.printDevice()
-def modconf(args): ##I have no idea how to handle this
-    pass
+    conf.printConfiguration()
+def modconf(args):
+    conf=Configuration(configuration_file_path)
+    if args.remove_device:
+        conf.removeDevice(args.device)
+    elif args.remove_folder:
+        conf.removeFolderFromDevice(args.device,args.remove_folder)
+    conf.write(configuration_file_path)
 def backupf(args):
     if args.all:
         conf=Configuration(configuration_file_path)
-        for device in conf.devices:
-            device.backup()
+        conf.backupAll()
     elif args.device:
         pass#device_name=args.device
 ##Configuration
@@ -120,13 +123,13 @@ class Configuration:
         #deleting all devices
         for deviceE in self.root.findall('device'):
             self.root.remove(deviceE)
-        ET.dump(self.root)
         #re-adding devices
-        print(len(self.devices))
         for device in self.devices:
             self.root.append(device.getDeviceElement())
         #writing new file
         self.tree.write(configuration_file_path)
+        if DEBUG:
+            ET.dump(self.root)
     def createConfigurationFile(self,configuration_file_path):
         if DEBUG:
             print('Writing default configuration file...')
@@ -159,6 +162,24 @@ class Configuration:
             print('Device name not found!')
             exit(-1)
         self.devices[i].addFolder(Folder(name,source,destination,filter_type,filter_string,include_hidden,enable))
+    def removeFolderFromDevice(self,device_name,folder_name):
+        for device in self.devices:
+            if device.name == device_name:
+                device.removeFolder(folder_name)
+                return
+        print('Device not found')
+    def removeDevice(self,device_name):
+        for device in self.devices:
+            if device.name == device_name:
+                self.devices.remove(device)
+                return
+        print('Device not found')
+    def printConfiguration(self):
+        for device in self.devices:
+            device.printDevice()
+    def backupAll(self):
+        for device in self.devices:
+            device.backupAll()
 ##End Configuration
 ##Device
 class Device:
@@ -205,6 +226,12 @@ class Device:
             print('Folder name already used!')
             exit(-1)
         self.folders.append(folder)
+    def removeFolder(self,folder_name):
+        for folder in self.folders:
+            if folder.name == folder_name:
+                self.folders.remove(folder)
+                return
+        print('Folder not found')
     def printDevice(self):
         print('\tName:',self.name,'\n\tAddress:',self.address)
         if hasattr(self,'port'):
@@ -221,37 +248,7 @@ class Device:
         if DEBUG:
             print('Name avaible')
         return True
-    def backup(self):
-        def getFileNames(retrlines,include_hidden=False,filter_type='e',filter_string=''):
-            def getWordFromFirstIndex(line,index):
-                word=''
-                while index<len(line):
-                    word=word+line[index]
-                    index+=1
-                return word
-            def getExtensionFromFileName(filename): #return the extension without the .
-                p=len(filename)-1#last character
-                extension=[]
-                while p != 0 and filename[p] is not '.':
-                    extension.insert(0,filename[p])
-                    p-=1
-                if p == 0:
-                    return ''
-                return ''.join(extension)
-            files=[]
-            for line in retrlines:
-                if line[0] is '-':##that's a file
-                    p=0
-                    for i in range(0,8): #skip first seven whitespaces
-                        while line[p] is not ' ':
-                            p+=1
-                        p+=1
-                    #p = first index of file name
-                    if (line[p] != '.') or ((line[p] == '.') and include_hidden):
-                        extension=getExtensionFromFileName(getWordFromFirstIndex(line,p))
-                        if ((filter_type == 'e') and (extension not in filter_string.split(','))) or ((filter_type == 'o') and (extension in filter_string.split(','))):
-                            files.append(getWordFromFirstIndex(line,p))#this file need to be backed up
-            return files
+    def backupAll(self):
         ftps=FTP()
         print('Connecting to device',self.name,'addr',self.address)
         ftps.connect(self.address,self.port if hasattr(self,'port') else 0) ##connected
@@ -260,14 +257,7 @@ class Device:
             ftps.login(self.user,self.passwd)
         print('Connected to',self.name)
         for folder in self.folders:#backup each folder
-            ftps.cwd(folder.source)
-            lines=[]
-            ftps.retrlines('LIST',lines.append)
-            print('folder:',folder.name)
-            files=getFileNames(lines,folder.include_hidden,folder.filter_type,folder.filter_string)
-            for name in files:
-                print('Downloading file:',folder.source+'/'+name)
-                ftps.retrbinary('RETR %s' % folder.source+'/'+name,open(folder.dest+'/'+name,'wb').write)
+            folder.backup(ftps)
         ftps.close()
 ##End Device
 ##Folder
@@ -296,6 +286,56 @@ class Folder:
         return folderE
     def printFolder(self):
         pass
+    def backup(self,ftps):
+        def excludeAlreadyDownloadedFiles(files,dest):
+            files1=[]
+            for f in files:
+                if not isfile(dest+'/'+f):
+                    files1.append(f)
+            return files1
+        def getFileNames(retrlines,include_hidden=False,filter_type='e',filter_string=''):
+            def getWordFromFirstIndex(line,index):
+                word=''
+                while index<len(line):
+                    word=word+line[index]
+                    index+=1
+                return word
+            def getExtensionFromFileName(filename): #return the extension without the '.'
+                p=len(filename)-1#last character
+                extension=[]
+                while p != 0 and filename[p] is not '.':
+                    extension.insert(0,filename[p])
+                    p-=1
+                if p == 0:#if no extension or hidden file
+                    return ''
+                return ''.join(extension)
+            files=[]
+            for line in retrlines:
+                if line[0] is '-':##that's a file
+                    p=0
+                    for i in range(0,8): #skip first seven whitespaces
+                        while line[p] is not ' ':
+                            p+=1
+                        p+=1
+                    #p = first index of file name
+                    if (line[p] != '.') or ((line[p] == '.') and include_hidden):
+                        extension=getExtensionFromFileName(getWordFromFirstIndex(line,p))
+                        if ((filter_type == 'e') and (extension not in filter_string.split(','))) or ((filter_type == 'o') and (extension in filter_string.split(','))):
+                            files.append(getWordFromFirstIndex(line,p))#this file need to be backed up
+            return files
+        if not self.enable:
+            return
+        ftps.cwd(self.source)
+        lines=[]
+        ftps.retrlines('LIST',lines.append)
+        print('Folder:',self.name)
+        #
+        files=getFileNames(lines,self.include_hidden,self.filter_type,self.filter_string)
+        #if a file is present in dest folder, don't download it twice
+        files=excludeAlreadyDownloadedFiles(files,self.dest)
+        for name in files:
+            print('Downloading file:',self.source+'/'+name)
+            ftps.retrbinary('RETR %s' % self.source+'/'+name,open(self.dest+'/'+name,'wb').write)
 ##End Folder
 ##Calling the main
 __main__()
