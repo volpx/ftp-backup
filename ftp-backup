@@ -11,7 +11,7 @@ import argparse
 DEBUG=0
 home=expanduser("~")
 configuration_file_path=home+'/.config/ftp-backup.cfg'
-version='ftp-backup v0'
+version='ftp-backup v0.1'
 def __main__():
     parser=argparse.ArgumentParser(description='Backup your smartphone wirelessly thru ftp',epilog='Created by Filippo Volpe (filippodalfarra98@gmail.com).')
     parser.add_argument('-v','--version',action='version',version=version)
