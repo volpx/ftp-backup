@@ -3,21 +3,22 @@
 #TODO: add test\check subprogram
 #TODO: add command line like interface
 
+import argparse
 import xml.etree.ElementTree as ET
 from ftplib import FTP
 from os.path import isfile
 from os.path import expanduser
-import argparse
-DEBUG=0
+DEBUG=1
 home=expanduser("~")
 configuration_file_path=home+'/.config/ftp-backup.cfg'
 version='ftp-backup v0.1'
-def __main__():
+def main():
     parser=argparse.ArgumentParser(description='Backup your smartphone wirelessly thru ftp',epilog='Created by Filippo Volpe (filippodalfarra98@gmail.com).')
     parser.add_argument('-v','--version',action='version',version=version)
     parser.add_argument('--gui',action='store_true',help='use the GUI')
+    parser.add_argument('--cli',action='store_true',help='use the CLI')
     #subparsers
-    subparsers=parser.add_subparsers(title='subparts',help='different subprograms')
+    subparsers=parser.add_subparsers(title='subparts')
     #parser_init
     parser_init=subparsers.add_parser('init',help='init a configuration')
     parser_init.add_argument('device_name',help='name of new device',metavar='DEV')
@@ -58,6 +59,9 @@ def __main__():
     #handle the stuff
     if DEBUG:
         print(args)
+    if args.cli:
+        cli()
+        return
     if args.gui:
         gui()
         return
@@ -66,6 +70,106 @@ def __main__():
         return
     #if nothing interrupt it will print the help
     parser.print_help()
+def cli():
+    cli=argparse.ArgumentParser(add_help=False)
+    cli_sub=cli.add_subparsers(description='CLI commands',dest='cli_subprog')
+    #help
+    #connect
+    #login
+    #disconnect
+    #cd
+    #download
+    #ls
+    #exit
+    cli_help=cli_sub.add_parser('help',help='print help')
+    #
+    cli_connect=cli_sub.add_parser('connect',help='connect to a server')
+    cli_connect.add_argument('address',metavar='ADDR')
+    cli_connect.add_argument('-p','--port',metavar='PORT')
+    #
+    cli_login=cli_sub.add_parser('login',help='login to server')
+    cli_login.add_argument('user',metavar='USER')
+    cli_login.add_argument('passwd',metavar='PASSWD')
+    #
+    cli_disconnect=cli_sub.add_parser('disconnect',help='disconnect to a server')
+    #
+    cli_cd=cli_sub.add_parser('cd',help='change working directory')
+    cli_cd.add_argument('folder',metavar='FOLD')
+    #
+    cli_download=cli_sub.add_parser('download',help='download from server')
+    cli_download.add_argument('source',metavar='SOUR')
+    cli_download.add_argument('destination',metavar='DEST')
+    cli_download.add_argument('-a',action='store_true')
+    cli_download.add_argument('-r',action='store_true')
+    #
+    cli_ls=cli_sub.add_parser('ls',help='list directory')
+    cli_ls.add_argument('-l',action='store_true')
+    #
+    cli_exit=cli_sub.add_parser('exit',help='exit from cli')
+    #
+    while True:
+        while True:
+            try:
+                cli_args=cli.parse_args(input('> ').split(' '))
+                break
+            except:
+                print('\nInvalid stuff')
+        if DEBUG:
+            print(cli_args)
+        cli_subprog=getattr(cli_args,'cli_subprog','')
+        if cli_subprog == 'exit':
+            break
+        elif cli_subprog == 'help':
+                cli.print_help()
+        elif cli_subprog == 'connect':
+            ftps=FTP()
+            ftps.connect(cli_args.address,int(getattr(cli_args,'port',0)))
+            print('Connected')
+        elif cli_subprog == 'login':
+            if 'ftps' not in locals():
+                print('connect first')
+                continue
+            ftps.login(cli_args.user,cli_args.passwd)
+            print('Logged')
+        elif cli_subprog == 'disconnect':
+            if 'ftps' in locals():
+                del ftps
+            print('Disconnected')
+        elif cli_subprog == 'cd':
+            if 'ftps' not in locals():
+                print('connect first')
+                continue
+            ftps.cwd(cli_args.folder)
+            print('Folder changed')
+        elif cli_subprog == 'ls':
+            if 'ftps' not in locals():
+                print('connect first')
+                continue
+            lines=[]
+            ftps.retrlines('LIST',lines.append)
+            if not cli_args.l:
+                files=[]
+                for line in lines:
+                    p=0
+                    for i in range(0,8): #skip first seven whitespaces
+                        while line[p] is not ' ':
+                            p+=1
+                        p+=1
+                    #p = first index of file name
+                    word=''
+                    while p<len(line):
+                        word=word+line[p]
+                        p+=1
+                    files.append(word)
+                lines=files
+            print('\n'.join(lines))
+        elif cli_subprog == 'download':
+            if 'ftps' not in locals():
+                print('connect first')
+                continue
+            #TODO:complete this with rich arguments gived(/folder/*.pmg or . or *) and recursion?
+            ftps.retrbinary('RETR %s' % cli_args.source,open(cli_args.destination,'wb').write) # for exact file names gived
+
 def gui():
     try:
         from dialog import Dialog#used for gui interaction
@@ -102,7 +206,7 @@ def backupf(args):
         conf=Configuration(configuration_file_path)
         conf.backupAll()
     elif args.device:
-        pass#device_name=args.device
+        pass#TODO:device_name=args.device
 ##Configuration
 class Configuration:
     """Configuration containing the devices"""
@@ -251,7 +355,7 @@ class Device:
     def backupAll(self):
         ftps=FTP()
         print('Connecting to device',self.name,'addr',self.address)
-        ftps.connect(self.address,self.port if hasattr(self,'port') else 0) ##connected
+        ftps.connect(self.address,getattr(self,'port',0)) ##connected
         if hasattr(self,'user'):
             print('Logging in to',self.name)
             ftps.login(self.user,self.passwd)
@@ -338,4 +442,5 @@ class Folder:
             ftps.retrbinary('RETR %s' % self.source+'/'+name,open(self.dest+'/'+name,'wb').write)
 ##End Folder
 ##Calling the main
-__main__()
+if __name__ == '__main__':
+    main()
