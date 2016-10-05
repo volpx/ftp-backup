@@ -1,5 +1,6 @@
 #!/usr/bin/python3
 #pythondialog needed
+#TODO:absolutely test folder changes!
 #TODO: add test\check subprogram
 #TODO: add command line like interface
 
@@ -44,6 +45,7 @@ def main():
     parser_addfolder.add_argument('-s','--filter-string',help='filter string',metavar='FS',default='')#the filter string is like 'png,pdf,doc'
     parser_addfolder.add_argument('-i','--include-hidden',action='store_true',help='include hidden files')
     parser_addfolder.add_argument('-e','--enable',action='store_true',help='enable immediately the folder')
+    parser_addfolder.add_argument('-R','--recursive',action='store_true',help='recursion through folders')
     parser_addfolder.set_defaults(func=addfolderf)
     #parser_list
     parser_list=subparsers.add_parser('list',help='list all devices')#TODO:adding options?
@@ -140,6 +142,7 @@ def cli():
                 print('connect first')
                 continue
             ftps.cwd(cli_args.folder)
+            print(ftps.pwd())
             print('Folder changed')
         elif cli_subprog == 'ls':
             if 'ftps' not in locals():
@@ -164,11 +167,30 @@ def cli():
                 lines=files
             print('\n'.join(lines))
         elif cli_subprog == 'download':
+            def isFolder(ftps,path):
+                current=ftps.pwd()
+                try:
+                    ftps.cwd(path)
+                except:
+                    ftps.cwd(current)
+                    return False
+                ftps.cwd(current)
+                return True
+
             if 'ftps' not in locals():
                 print('connect first')
                 continue
             #TODO:complete this with rich arguments gived(/folder/*.pmg or . or *) and recursion?
-            ftps.retrbinary('RETR %s' % cli_args.source,open(cli_args.destination,'wb').write) # for exact file names gived
+            #source possibilities:
+            #/folder download all files inside the folder(-R > also in children)
+            #/folder/file.png donwload only the file
+            if isFolder(ftps,cli_args.source): #download all the inside
+                downloadFolder()
+                lines=[]
+                ftps.retrlines('LIST',lines.append)
+                fname=getFolderNames(lines,cli_args.a)
+            else:
+                ftps.retrbinary('RETR %s' % cli_args.source,open(cli_args.destination,'wb').write) # for exact file names gived
 
 def gui():
     try:
@@ -189,7 +211,7 @@ def addfolderf(args):
     conf=Configuration(configuration_file_path)
     if DEBUG:
         print('Adding folder:',args.device)
-    conf.addFolderToDevice(args.device,args.name,args.source,args.destination,args.filter_type,args.filter_string,args.include_hidden,args.enable)
+    conf.addFolderToDevice(args.device,Folder(args.name,args.source,args.destination,args.filter_type,args.filter_string,args.include_hidden,args.enable,args.recursive))
     conf.write(configuration_file_path)
 def listf(args):
     conf=Configuration(configuration_file_path)
@@ -256,7 +278,7 @@ class Configuration:
         if DEBUG:
             print('Name avaible')
         return True
-    def addFolderToDevice(self,device,name,source,destination,filter_type='e',filter_string='',include_hidden=False,enable=False):
+    def addFolderToDevice(self,device,folder):
         #Search the name
         i=0
         try:
@@ -265,7 +287,7 @@ class Configuration:
         except IndexError:
             print('Device name not found!')
             exit(-1)
-        self.devices[i].addFolder(Folder(name,source,destination,filter_type,filter_string,include_hidden,enable))
+        self.devices[i].addFolder(folder)
     def removeFolderFromDevice(self,device_name,folder_name):
         for device in self.devices:
             if device.name == device_name:
@@ -366,7 +388,7 @@ class Device:
 ##End Device
 ##Folder
 class Folder:
-    def __init__(self,name,source,dest,filter_type='e',filter_string='',include_hidden=False,enable=True):
+    def __init__(self,name,source,dest,filter_type='e',filter_string='',include_hidden=False,enable=True,recursive=False):
         self.name=name
         self.source=source
         self.dest=dest
@@ -374,9 +396,10 @@ class Folder:
         self.filter_type=filter_type
         self.filter_string=filter_string
         self.enable=enable
+        self.recursive=recursive
     @classmethod
     def fromFolderElement(cls,folderE):
-        return cls(folderE.get('name'),folderE.get('source'),folderE.get('dest'),folderE.get('filter_type'),folderE.get('filter_string'),('true'==folderE.get('include_hidden')),('true'==folderE.get('enable')))
+        return cls(folderE.get('name'),folderE.get('source'),folderE.get('dest'),folderE.get('filter_type'),folderE.get('filter_string'),('true'==folderE.get('include_hidden')),('true'==folderE.get('enable')),('true'==folderE.get('recursive')))
 
     def getFolderElement(self):
         folderE=ET.Element('folder')
@@ -387,46 +410,60 @@ class Folder:
         folderE.set('filter_type',self.filter_type)
         folderE.set('filter_string',self.filter_string)
         folderE.set('enable','true' if self.enable else 'false')
+        folderE.set('recursive','true' if self.recursive else 'false')
         return folderE
     def printFolder(self):
         pass
     def backup(self,ftps):
+        def getWordFromFirstIndex(line,index):
+            word=''
+            while index<len(line):
+                word=word+line[index]
+                index+=1
+            return word
         def excludeAlreadyDownloadedFiles(files,dest):
             files1=[]
             for f in files:
                 if not isfile(dest+'/'+f):
                     files1.append(f)
             return files1
-        def getFileNames(retrlines,include_hidden=False,filter_type='e',filter_string=''):
-            def getWordFromFirstIndex(line,index):
-                word=''
-                while index<len(line):
-                    word=word+line[index]
-                    index+=1
-                return word
-            def getExtensionFromFileName(filename): #return the extension without the '.'
+        def getExtensionFromFileName(filename): #return the extension without the '.'
                 p=len(filename)-1#last character
                 extension=[]
-                while p != 0 and filename[p] is not '.':
+                while p != 0 and filename[p] != '.':
                     extension.insert(0,filename[p])
                     p-=1
                 if p == 0:#if no extension or hidden file
                     return ''
                 return ''.join(extension)
+        def getFileNames(retrlines,include_hidden=False,filter_type='e',filter_string=''):
             files=[]
             for line in retrlines:
-                if line[0] is '-':##that's a file
+                if line[0] == '-':##that's a file
                     p=0
                     for i in range(0,8): #skip first seven whitespaces
-                        while line[p] is not ' ':
+                        while line[p] != ' ':
                             p+=1
                         p+=1
                     #p = first index of file name
-                    if (line[p] != '.') or ((line[p] == '.') and include_hidden):
+                    if (line[p] != '.') or  include_hidden:
                         extension=getExtensionFromFileName(getWordFromFirstIndex(line,p))
                         if ((filter_type == 'e') and (extension not in filter_string.split(','))) or ((filter_type == 'o') and (extension in filter_string.split(','))):
                             files.append(getWordFromFirstIndex(line,p))#this file need to be backed up
             return files
+        def getFoldersNames(retrlines,include_hidden):
+            fnames=[]
+            for line in retrlines:
+                if line[0] == 'd': #thats a directory
+                    p=0
+                    for i in range(0,8): #skip first seven whitespaces
+                        while line[p] != ' ':
+                            p+=1
+                    p+=1
+                    #p = first index of folder name
+                    if (line[p] != '.') or include_hidden:
+                        fnames.append(getWordFromFirstIndex(line,p))
+            return fnames
         if not self.enable:
             return
         ftps.cwd(self.source)
@@ -439,7 +476,15 @@ class Folder:
         files=excludeAlreadyDownloadedFiles(files,self.dest)
         for name in files:
             print('Downloading file:',self.source+'/'+name)
+            if not os.path.exists(self.dest):
+                os.makedirs(self.dest)
             ftps.retrbinary('RETR %s' % self.source+'/'+name,open(self.dest+'/'+name,'wb').write)
+        if self.recursive:
+            lines=[]
+            ftps.retrlines('LIST',lines.append)
+            fnames=getFoldersNames(lines,self.include_hidden)
+            for fname in fnames:
+                Folder(fname,self.source+'/'+fname,self.dest+'/'+fname,filter_type=self.filter_type,filter_string=self.filter_string,include_hidden=self.include_hidden,enable=True,recursive=True).backup(ftps)
 ##End Folder
 ##Calling the main
 if __name__ == '__main__':
