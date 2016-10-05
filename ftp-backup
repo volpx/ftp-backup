@@ -1,14 +1,17 @@
 #!/usr/bin/python3
 #pythondialog needed
 #TODO:absolutely test folder changes!
+#TODO:absolutely test cli download!
 #TODO: add test\check subprogram
-#TODO: add command line like interface
 
 import argparse
 import xml.etree.ElementTree as ET
 from ftplib import FTP
 from os.path import isfile
 from os.path import expanduser
+from os.path import isdir
+from os.path import exists
+from os.path import basename
 DEBUG=1
 home=expanduser("~")
 configuration_file_path=home+'/.config/ftp-backup.cfg'
@@ -75,14 +78,7 @@ def main():
 def cli():
     cli=argparse.ArgumentParser(add_help=False)
     cli_sub=cli.add_subparsers(description='CLI commands',dest='cli_subprog')
-    #help
-    #connect
-    #login
-    #disconnect
-    #cd
-    #download
-    #ls
-    #exit
+    #
     cli_help=cli_sub.add_parser('help',help='print help')
     #
     cli_connect=cli_sub.add_parser('connect',help='connect to a server')
@@ -176,7 +172,6 @@ def cli():
                     return False
                 ftps.cwd(current)
                 return True
-
             if 'ftps' not in locals():
                 print('connect first')
                 continue
@@ -185,12 +180,12 @@ def cli():
             #/folder download all files inside the folder(-R > also in children)
             #/folder/file.png donwload only the file
             if isFolder(ftps,cli_args.source): #download all the inside
-                downloadFolder()
-                lines=[]
-                ftps.retrlines('LIST',lines.append)
-                fname=getFolderNames(lines,cli_args.a)
+                Folder(cli_args.source,cli_args.source,cli_args.destination,recursion=args.recursion).backup(ftps)
             else:
-                ftps.retrbinary('RETR %s' % cli_args.source,open(cli_args.destination,'wb').write) # for exact file names gived
+                dest=cli_args.destination
+                if isdir(dest):
+                    dest=dest+'/'+basename(cli_args.source)
+                ftps.retrbinary('RETR %s' % cli_args.source,open(dest,'wb').write) # for exact file names gived
 
 def gui():
     try:
@@ -476,8 +471,8 @@ class Folder:
         files=excludeAlreadyDownloadedFiles(files,self.dest)
         for name in files:
             print('Downloading file:',self.source+'/'+name)
-            if not os.path.exists(self.dest):
-                os.makedirs(self.dest)
+            if not isdir(self.dest):
+                makedirs(self.dest)
             ftps.retrbinary('RETR %s' % self.source+'/'+name,open(self.dest+'/'+name,'wb').write)
         if self.recursive:
             lines=[]
