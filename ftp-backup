@@ -1,7 +1,6 @@
 #!/usr/bin/python3
 #pythondialog needed
 #TODO:absolutely test folder changes!
-#TODO:absolutely test cli download!
 #TODO: add test\check subprogram
 
 import argparse
@@ -12,6 +11,7 @@ from os.path import expanduser
 from os.path import isdir
 from os.path import exists
 from os.path import basename
+from os import makedirs
 DEBUG=1
 home=expanduser("~")
 configuration_file_path=home+'/.config/ftp-backup.cfg'
@@ -98,7 +98,7 @@ def cli():
     cli_download.add_argument('source',metavar='SOUR')
     cli_download.add_argument('destination',metavar='DEST')
     cli_download.add_argument('-a',action='store_true')
-    cli_download.add_argument('-r',action='store_true')
+    cli_download.add_argument('-R',action='store_true')
     #
     cli_ls=cli_sub.add_parser('ls',help='list directory')
     cli_ls.add_argument('-l',action='store_true')
@@ -180,8 +180,8 @@ def cli():
             #/folder download all files inside the folder(-R > also in children)
             #/folder/file.png donwload only the file
             if isFolder(ftps,cli_args.source): #download all the inside
-                Folder(cli_args.source,cli_args.source,cli_args.destination,recursion=args.recursion).backup(ftps)
-            else:
+                Folder(cli_args.source,cli_args.source,cli_args.destination,recursive=cli_args.R,include_hidden=cli_args.a).backup(ftps)
+            else:#is a file
                 dest=cli_args.destination
                 if isdir(dest):
                     dest=dest+'/'+basename(cli_args.source)
@@ -436,48 +436,51 @@ class Folder:
             for line in retrlines:
                 if line[0] == '-':##that's a file
                     p=0
-                    for i in range(0,8): #skip first seven whitespaces
+                    for i in range(0,8): #skip first eight whitespaces
                         while line[p] != ' ':
                             p+=1
                         p+=1
                     #p = first index of file name
-                    if (line[p] != '.') or  include_hidden:
+                    if (line[p] != '.') or include_hidden:
                         extension=getExtensionFromFileName(getWordFromFirstIndex(line,p))
-                        if ((filter_type == 'e') and (extension not in filter_string.split(','))) or ((filter_type == 'o') and (extension in filter_string.split(','))):
+                        if ((filter_type == 'e') and ((extension not in filter_string.split(',')) or extension == '')) or ((filter_type == 'o') and (extension in filter_string.split(','))):
                             files.append(getWordFromFirstIndex(line,p))#this file need to be backed up
             return files
-        def getFoldersNames(retrlines,include_hidden):
+        def getFolderNames(retrlines,include_hidden):
             fnames=[]
             for line in retrlines:
                 if line[0] == 'd': #thats a directory
                     p=0
-                    for i in range(0,8): #skip first seven whitespaces
+                    for i in range(0,8): #skip first eight whitespaces
                         while line[p] != ' ':
                             p+=1
-                    p+=1
+                        p+=1
                     #p = first index of folder name
                     if (line[p] != '.') or include_hidden:
                         fnames.append(getWordFromFirstIndex(line,p))
             return fnames
         if not self.enable:
             return
+        current=ftps.pwd()
         ftps.cwd(self.source)
         lines=[]
         ftps.retrlines('LIST',lines.append)
+        ftps.cwd(current)
         print('Folder:',self.name)
-        #
         files=getFileNames(lines,self.include_hidden,self.filter_type,self.filter_string)
+        #if tilde is used
+        if self.dest[0] == '~':
+            self.dest=self.dest.replace('~',home,1)
+        #create destination folder if needed
+        if not isdir(self.dest):
+            makedirs(self.dest)
         #if a file is present in dest folder, don't download it twice
         files=excludeAlreadyDownloadedFiles(files,self.dest)
         for name in files:
-            print('Downloading file:',self.source+'/'+name)
-            if not isdir(self.dest):
-                makedirs(self.dest)
+            print('[remote]',self.source+'/'+name,'>>> [local]',self.dest+'/'+name)
             ftps.retrbinary('RETR %s' % self.source+'/'+name,open(self.dest+'/'+name,'wb').write)
         if self.recursive:
-            lines=[]
-            ftps.retrlines('LIST',lines.append)
-            fnames=getFoldersNames(lines,self.include_hidden)
+            fnames=getFolderNames(lines,self.include_hidden)
             for fname in fnames:
                 Folder(fname,self.source+'/'+fname,self.dest+'/'+fname,filter_type=self.filter_type,filter_string=self.filter_string,include_hidden=self.include_hidden,enable=True,recursive=True).backup(ftps)
 ##End Folder
