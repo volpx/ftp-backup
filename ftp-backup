@@ -1,6 +1,5 @@
 #!/usr/bin/python3
 #pythondialog needed
-#TODO:absolutely test folder changes!
 #TODO: add test\check subprogram
 
 import argparse
@@ -12,12 +11,12 @@ from os.path import isdir
 from os.path import exists
 from os.path import basename
 from os import makedirs
-DEBUG=1
+DEBUG=0
 home=expanduser("~")
 configuration_file_path=home+'/.config/ftp-backup.cfg'
 version='ftp-backup v0.1'
 def main():
-    parser=argparse.ArgumentParser(description='Backup your smartphone wirelessly thru ftp',epilog='Created by Filippo Volpe (filippodalfarra98@gmail.com).')
+    parser=argparse.ArgumentParser(description='Backup your smartphone wirelessly through ftp',epilog='Created by Filippo Volpe (filippodalfarra98@gmail.com).')
     parser.add_argument('-v','--version',action='version',version=version)
     parser.add_argument('--gui',action='store_true',help='use the GUI')
     parser.add_argument('--cli',action='store_true',help='use the CLI')
@@ -70,7 +69,8 @@ def main():
     if args.gui:
         gui()
         return
-    if hasattr(args,'func'): #if subprogram is called, call the proper function
+    #if subprogram is called, call the proper function
+    if hasattr(args,'func'):
         args.func(args)
         return
     #if nothing interrupt it will print the help
@@ -146,11 +146,15 @@ def cli():
                 continue
             lines=[]
             ftps.retrlines('LIST',lines.append)
-            if not cli_args.l:
+            if cli_args.l:
+                print('\n'.join(lines))
+            else :
                 files=[]
+                folders=[]
                 for line in lines:
                     p=0
-                    for i in range(0,8): #skip first seven whitespaces
+                    #skip first seven whitespaces
+                    for i in range(0,8):
                         while line[p] is not ' ':
                             p+=1
                         p+=1
@@ -159,9 +163,11 @@ def cli():
                     while p<len(line):
                         word=word+line[p]
                         p+=1
-                    files.append(word)
-                lines=files
-            print('\n'.join(lines))
+                    if line[0] == '-':
+                        files.append(word)
+                    elif line[0] == 'd':
+                        folders.append(word)
+                print('Files:\n\t','\n\t'.join(files),'\nFolders:\n\t','\n\t'.join(folders),sep='')
         elif cli_subprog == 'download':
             def isFolder(ftps,path):
                 current=ftps.pwd()
@@ -175,13 +181,11 @@ def cli():
             if 'ftps' not in locals():
                 print('connect first')
                 continue
-            #TODO:complete this with rich arguments gived(/folder/*.pmg or . or *) and recursion?
-            #source possibilities:
-            #/folder download all files inside the folder(-R > also in children)
-            #/folder/file.png donwload only the file
-            if isFolder(ftps,cli_args.source): #download all the inside
+            if isFolder(ftps,cli_args.source):
+                #download all the inside
                 Folder(cli_args.source,cli_args.source,cli_args.destination,recursive=cli_args.R,include_hidden=cli_args.a).backup(ftps)
-            else:#is a file
+            else:
+                #is a file
                 dest=cli_args.destination
                 if isdir(dest):
                     dest=dest+'/'+basename(cli_args.source)
@@ -223,7 +227,8 @@ def backupf(args):
         conf=Configuration(configuration_file_path)
         conf.backupAll()
     elif args.device:
-        pass#TODO:device_name=args.device
+        conf=Configuration(configuration_file_path)
+        conf.backupDevice(args.device)
 ##Configuration
 class Configuration:
     """Configuration containing the devices"""
@@ -301,6 +306,11 @@ class Configuration:
     def backupAll(self):
         for device in self.devices:
             device.backupAll()
+    def backupDevice(self,name):
+        for device in self.devices:
+            if device.name == name:
+                device.backupAll()
+                break
 ##End Configuration
 ##Device
 class Device:
