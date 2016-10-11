@@ -11,6 +11,7 @@ from os.path import isdir
 from os.path import exists
 from os.path import basename
 from os import makedirs
+from shlex import split as shlex_split
 DEBUG=0
 home=expanduser("~")
 configuration_file_path=home+'/.config/ftp-backup.cfg'
@@ -108,7 +109,7 @@ def cli():
     while True:
         while True:
             try:
-                cli_args=cli.parse_args(input('> ').split(' '))
+                cli_args=cli.parse_args(shlex_split(input('> ')))
                 break
             except:
                 print('\nInvalid stuff')
@@ -116,6 +117,8 @@ def cli():
             print(cli_args)
         cli_subprog=getattr(cli_args,'cli_subprog','')
         if cli_subprog == 'exit':
+            if 'ftps' in locals():
+                del ftps
             break
         elif cli_subprog == 'help':
                 cli.print_help()
@@ -189,6 +192,7 @@ def cli():
                 dest=cli_args.destination
                 if isdir(dest):
                     dest=dest+'/'+basename(cli_args.source)
+                print('[remote]',ftps.pwd()+cli_args.source,'>>> [local]',dest)
                 ftps.retrbinary('RETR %s' % cli_args.source,open(dest,'wb').write) # for exact file names gived
 
 def gui():
