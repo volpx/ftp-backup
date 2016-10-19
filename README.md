@@ -9,4 +9,5 @@
 4. "sudo ./setup --install"
 
 #### Disinstallation
-1. Remove ftp-backup file and ~/.config/ftp-backup.cfg
+1. "sudo pip uninstall ftp-backup"
+2. "rm ~/.config/ftp-backup.cfg"
