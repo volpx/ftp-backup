@@ -1,0 +1,11 @@
+v0.3
+
+Fully tested, optimized, divided in files and added some exception handling
+
+v0.3.beta
+
+First almost functioning release
+
+v0.3.alpha
+
+Changes made need to test
