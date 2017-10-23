@@ -8,6 +8,6 @@
 3. "cd ftp-backup"
 4. "sudo ./setup install"
 
-#### Disinstallation
+#### Uninstalling
 1. "sudo pip uninstall ftp-backup"
 2. "rm ~/.config/ftp-backup.cfg"
